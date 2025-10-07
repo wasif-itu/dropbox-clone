@@ -1,28 +1,35 @@
 CC = gcc
-CFLAGS = -Wall -Iinclude
-SRC_DIR = src
-BIN_DIR = bin
+CFLAGS = -Wall -Wextra -pthread -Iinclude -g
+SRCDIR = src
+OBJ = $(SRCDIR)/queue.o $(SRCDIR)/auth.o $(SRCDIR)/storage.o $(SRCDIR)/worker_pool.o $(SRCDIR)/client_pool.o $(SRCDIR)/main.o
 
-SERVER = $(BIN_DIR)/server
-CLIENT = $(BIN_DIR)/client
+all: server client_app
 
-all: $(SERVER) $(CLIENT)
+server: $(OBJ)
+	$(CC) $(CFLAGS) -o server $(OBJ)
 
-$(BIN_DIR):
-	mkdir -p $(BIN_DIR)
+client_app: src/client_app.c
+	$(CC) $(CFLAGS) -o client_app src/client_app.c
 
-$(SERVER): $(SRC_DIR)/server.c | $(BIN_DIR)
-	$(CC) $(CFLAGS) -o $(SERVER) $(SRC_DIR)/server.c
+src/queue.o: src/queue.c include/queue.h
+	$(CC) $(CFLAGS) -c src/queue.c -o src/queue.o
 
-$(CLIENT): $(SRC_DIR)/client.c | $(BIN_DIR)
-	$(CC) $(CFLAGS) -o $(CLIENT) $(SRC_DIR)/client.c
+src/auth.o: src/auth.c include/auth.h
+	$(CC) $(CFLAGS) -c src/auth.c -o src/auth.o
+
+src/storage.o: src/storage.c include/storage.h
+	$(CC) $(CFLAGS) -c src/storage.c -o src/storage.o
+
+src/worker_pool.o: src/worker_pool.c include/worker_pool.h include/server_types.h include/storage.h include/queue.h
+	$(CC) $(CFLAGS) -c src/worker_pool.c -o src/worker_pool.o
+
+src/client_pool.o: src/client_pool.c include/client_pool.h include/server_types.h include/queue.h include/auth.h include/storage.h
+	$(CC) $(CFLAGS) -c src/client_pool.c -o src/client_pool.o
+
+src/main.o: src/main.c include/dropbox.h include/queue.h include/client_pool.h include/worker_pool.h include/auth.h include/storage.h
+	$(CC) $(CFLAGS) -c src/main.c -o src/main.o
 
 clean:
-	rm -rf $(BIN_DIR)
+	rm -f src/*.o server client_app
 
-run-server:
-	./bin/server
-
-run-client:
-	./bin/client
-.PHONY: all clean run-server run-client
+.PHONY: all clean
