@@ -4,15 +4,18 @@
 #include <unistd.h>
 #include <arpa/inet.h>
 #include <sys/stat.h>
-#include <dirent.h>
 #include "../include/dropbox.h"
 
 void receive_file(int new_socket, char *filename) {
     char buffer[BUFFER_SIZE];
     char path[256];
+    // Strip directory from filename
     char *base = strrchr(filename, '/');
-    base = base ? base + 1 : filename;
-
+    if (base) {
+        base++;
+    } else {
+        base = filename;
+    }
     snprintf(path, sizeof(path), "server_storage/%s", base);
     FILE *fp = fopen(path, "wb");
     if (!fp) {
@@ -27,16 +30,21 @@ void receive_file(int new_socket, char *filename) {
         fwrite(buffer, 1, bytes_read, fp);
     }
     fclose(fp);
-    printf("File '%s' received and saved.\n", base);
+    printf("File '%s' received and saved.\n", filename);
 }
 
 void send_file(int new_socket, char *filename) {
     char buffer[BUFFER_SIZE];
     char path[256];
+    // Strip directory from filename
     char *base = strrchr(filename, '/');
-    base = base ? base + 1 : filename;
-
+    if (base) {
+        base++;
+    } else {
+        base = filename;
+    }
     snprintf(path, sizeof(path), "server_storage/%s", base);
+
     FILE *fp = fopen(path, "rb");
     if (!fp) {
         send(new_socket, "ERROR", strlen("ERROR"), 0);
@@ -50,29 +58,7 @@ void send_file(int new_socket, char *filename) {
 
     send(new_socket, "DONE", 4, 0);
     fclose(fp);
-    printf("File '%s' sent to client.\n", base);
-}
-
-void list_files(int new_socket) {
-    DIR *dir = opendir("server_storage");
-    if (!dir) {
-        perror("Failed to open server_storage");
-        send(new_socket, "ERROR", strlen("ERROR"), 0);
-        return;
-    }
-
-    struct dirent *entry;
-    char buffer[BUFFER_SIZE];
-    while ((entry = readdir(dir)) != NULL) {
-        if (strcmp(entry->d_name, ".") == 0 || strcmp(entry->d_name, "..") == 0)
-            continue;
-        snprintf(buffer, sizeof(buffer), "%s\n", entry->d_name);
-        send(new_socket, buffer, strlen(buffer), 0);
-    }
-
-    send(new_socket, "DONE", 4, 0);
-    closedir(dir);
-    printf("File list sent to client.\n");
+    printf("File '%s' sent to client.\n", filename);
 }
 
 int main() {
@@ -89,7 +75,7 @@ int main() {
         exit(EXIT_FAILURE);
     }
 
-    setsockopt(server_fd, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt));
+    setsockopt(server_fd, SOL_SOCKET, SO_REUSEADDR , &opt, sizeof(opt));
     address.sin_family = AF_INET;
     address.sin_addr.s_addr = INADDR_ANY;
     address.sin_port = htons(PORT);
@@ -124,8 +110,6 @@ int main() {
             receive_file(new_socket, filename);
         } else if (strcmp(command, "DOWNLOAD") == 0) {
             send_file(new_socket, filename);
-        } else if (strcmp(command, "LIST") == 0) {
-            list_files(new_socket);
         } else {
             send(new_socket, "INVALID", strlen("INVALID"), 0);
         }
@@ -136,3 +120,4 @@ int main() {
     close(server_fd);
     return 0;
 }
+DONE
