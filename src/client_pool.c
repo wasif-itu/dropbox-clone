@@ -219,7 +219,7 @@ static void client_handle_connection(int client_fd) {
                     send_all(client_fd, header, strlen(header));
                     send_all(client_fd, res->payload, res->payload_size);
                 } else {
-                    char tmp[256];
+                    char tmp[512];
                     snprintf(tmp, sizeof(tmp), "ERR download %s\n", res->errmsg);
                     send_all(client_fd, tmp, strlen(tmp));
                 }

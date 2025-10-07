@@ -7,11 +7,28 @@
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
+#include <errno.h>
 
 static const char *ROOT = "server_storage";
 
 int storage_init(void) {
-    mkdir(ROOT, 0777);
+    char cwd[1024];
+    if (getcwd(cwd, sizeof(cwd)) != NULL) {
+        fprintf(stderr, "[storage_init] server cwd: %s\n", cwd);
+    } else {
+        perror("[storage_init] getcwd");
+    }
+
+    if (mkdir(ROOT, 0777) != 0) {
+        if (errno == EEXIST) {
+            fprintf(stderr, "[storage_init] %s already exists (ok)\n", ROOT);
+            return 0;
+        } else {
+            fprintf(stderr, "[storage_init] mkdir(%s) failed: %s\n", ROOT, strerror(errno));
+            return -1;
+        }
+    }
+    fprintf(stderr, "[storage_init] created %s\n", ROOT);
     return 0;
 }
 
@@ -19,39 +36,57 @@ int storage_ensure_userdir(const char *username) {
     if (!username) return -1;
     char path[512];
     snprintf(path, sizeof(path), "%s/%s", ROOT, username);
-    mkdir(path, 0777);
+    if (mkdir(path, 0777) != 0) {
+        if (errno == EEXIST) return 0;
+        fprintf(stderr, "[storage_ensure_userdir] mkdir(%s) failed: %s\n", path, strerror(errno));
+        return -1;
+    }
     return 0;
 }
 
+/* rest of file unchanged... */
+
 int storage_write_blob(const char *username, const char *filename, const char *buf, size_t n) {
     if (!username || !filename) return -1;
-    storage_ensure_userdir(username);
-    // Strip directory from filename
+    if (storage_ensure_userdir(username) != 0) return -1;
     const char *base = strrchr(filename, '/');
     if (base) base++;
     else base = filename;
     char path[512], tmp[512];
     snprintf(path, sizeof(path), "%s/%s/%s", ROOT, username, base);
-    snprintf(tmp, sizeof(tmp), "%s/%s.tmp", ROOT, username, base);
+    snprintf(tmp, sizeof(tmp), "%s/%s/.%s.tmp", ROOT, username, base);
     FILE *fp = fopen(tmp, "wb");
-    if (!fp) return -1;
+    if (!fp) {
+        fprintf(stderr, "[storage_write_blob] fopen(%s) failed: %s\n", tmp, strerror(errno));
+        return -1;
+    }
     size_t w = fwrite(buf, 1, n, fp);
     fclose(fp);
-    if (w != n) { remove(tmp); return -1; }
-    if (rename(tmp, path) != 0) { remove(tmp); return -1; }
+    if (w != n) { 
+        remove(tmp); 
+        fprintf(stderr, "[storage_write_blob] fwrite mismatch: wrote %zu expected %zu\n", w, n);
+        return -1; 
+    }
+    if (rename(tmp, path) != 0) { 
+        remove(tmp); 
+        fprintf(stderr, "[storage_write_blob] rename(%s -> %s) failed: %s\n", tmp, path, strerror(errno));
+        return -1; 
+    }
     return 0;
 }
 
 char *storage_read_file(const char *username, const char *filename, size_t *len) {
     if (!username || !filename) return NULL;
-    // Strip directory from filename
     const char *base = strrchr(filename, '/');
     if (base) base++;
     else base = filename;
     char path[512];
     snprintf(path, sizeof(path), "%s/%s/%s", ROOT, username, base);
     FILE *fp = fopen(path, "rb");
-    if (!fp) return NULL;
+    if (!fp) {
+        fprintf(stderr, "[storage_read_file] fopen(%s) failed: %s\n", path, strerror(errno));
+        return NULL;
+    }
     fseek(fp, 0, SEEK_END);
     long sz = ftell(fp);
     fseek(fp, 0, SEEK_SET);
@@ -68,13 +103,13 @@ char *storage_read_file(const char *username, const char *filename, size_t *len)
 
 int storage_delete_file(const char *username, const char *filename) {
     if (!username || !filename) return -1;
-    // Strip directory from filename
     const char *base = strrchr(filename, '/');
     if (base) base++;
     else base = filename;
     char path[512];
     snprintf(path, sizeof(path), "%s/%s/%s", ROOT, username, base);
     if (unlink(path) == 0) return 0;
+    fprintf(stderr, "[storage_delete_file] unlink(%s) failed: %s\n", path, strerror(errno));
     return -1;
 }
 
@@ -83,7 +118,10 @@ char *storage_list_files(const char *username) {
     char path[512];
     snprintf(path, sizeof(path), "%s/%s", ROOT, username);
     DIR *d = opendir(path);
-    if (!d) return NULL;
+    if (!d) {
+        fprintf(stderr, "[storage_list_files] opendir(%s) failed: %s\n", path, strerror(errno));
+        return NULL;
+    }
     size_t cap = 4096;
     char *out = malloc(cap);
     if (!out) { closedir(d); return NULL; }

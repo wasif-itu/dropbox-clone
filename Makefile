@@ -29,7 +29,15 @@ src/client_pool.o: src/client_pool.c include/client_pool.h include/server_types.
 src/main.o: src/main.c include/dropbox.h include/queue.h include/client_pool.h include/worker_pool.h include/auth.h include/storage.h
 	$(CC) $(CFLAGS) -c src/main.c -o src/main.o
 
-clean:
-	rm -f src/*.o server client_app
+tsan:
+	$(CC) -g -O1 -fsanitize=thread -fno-omit-frame-pointer -pthread -Iinclude -o server_tsan \
+	$(SRCDIR)/queue.c $(SRCDIR)/auth.c $(SRCDIR)/storage.c $(SRCDIR)/worker_pool.c $(SRCDIR)/client_pool.c $(SRCDIR)/main.c
 
-.PHONY: all clean
+valgrind: server
+	valgrind --leak-check=full --show-leak-kinds=all --track-origins=yes ./server
+
+clean:
+	rm -f src/*.o server client_app server_tsan
+	rm -rf server_storage
+
+.PHONY: all clean tsan valgrind
