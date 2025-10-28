@@ -332,7 +332,7 @@ chmod 755 server_storage
 
 ---
 
-## Phase 1 Deliverables
+## Deliverables
 
 - ✅ Source code with proper file structure
 - ✅ Makefile with all targets
@@ -340,13 +340,15 @@ chmod 755 server_storage
 - ✅ Automated test scripts
 - ✅ Valgrind clean run
 - ✅ ThreadSanitizer clean run
-- 📄 Phase 1 Report (separate document)
 
 ---
 
 ## Authors
 
-[Your Name]  
+Muhammad Wasif BSCS23020
+Mobeen Qamar BSCS23050
+Saifullah Arshad BSCS23065
+ 
 Operating Systems Lab - Phase 1
 
 ## License
