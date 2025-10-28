@@ -8,6 +8,7 @@
 #include <stdio.h>
 #include <string.h>
 #include <unistd.h>
+/* worker running state is driven by queue_close; no atomic needed */
 
 /* Simple file-lock map */
 typedef struct file_lock_entry {
@@ -61,7 +62,6 @@ static void fl_release(file_lock_entry *e) {
 static pthread_t *worker_threads = NULL;
 static size_t worker_count = 0;
 static queue_t *task_queue_global = NULL;
-static int worker_running = 0;
 static unsigned long task_id_counter = 1;
 static pthread_mutex_t task_id_mtx = PTHREAD_MUTEX_INITIALIZER;
 
@@ -162,7 +162,7 @@ static void worker_do_task(Task *t) {
 
 static void *worker_thread_main(void *arg) {
     (void)arg;
-    while (worker_running) {
+    while (1) {
         Task *t = (Task *)queue_pop(task_queue_global);
         if (!t) break;
         worker_do_task(t);
@@ -171,13 +171,12 @@ static void *worker_thread_main(void *arg) {
 }
 
 int worker_pool_start(size_t num_threads, queue_t *task_queue) {
-    if (worker_running) return -1;
+    if (worker_threads != NULL) return -1;
     if (!task_queue || num_threads == 0) return -1;
     task_queue_global = task_queue;
     worker_threads = calloc(num_threads, sizeof(pthread_t));
     if (!worker_threads) return -1;
     worker_count = num_threads;
-    worker_running = 1;
     for (size_t i = 0; i < num_threads; ++i) {
         pthread_create(&worker_threads[i], NULL, worker_thread_main, NULL);
     }
@@ -185,8 +184,8 @@ int worker_pool_start(size_t num_threads, queue_t *task_queue) {
 }
 
 void worker_pool_stop(void) {
-    if (!worker_running) return;
-    worker_running = 0;
+    if (!worker_threads) return;
+    /* close the task queue to wake workers */
     queue_close(task_queue_global);
     for (size_t i = 0; i < worker_count; ++i) {
         pthread_join(worker_threads[i], NULL);

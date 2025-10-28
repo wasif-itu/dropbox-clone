@@ -180,7 +180,31 @@ echo
 
 # Clean up for next test
 rm -f client_*.log download_*.txt
-rm -rf ../server_storage
+ rm -rf ../server_storage
+ # The server process keeps running and may have stale references to the storage
+ # directory; restart the server so it can re-create storage cleanly.
+ print_status "Restarting server to reset storage..."
+ cd ..
+ if [ -n "$SERVER_PID" ] && kill -0 "$SERVER_PID" 2>/dev/null; then
+     kill -INT "$SERVER_PID" 2>/dev/null || true
+     # wait up to 3s for shutdown
+     for _ in {1..30}; do
+         if ! kill -0 "$SERVER_PID" 2>/dev/null; then break; fi
+         sleep 0.1
+     done
+     wait "$SERVER_PID" 2>/dev/null || true
+fi
+./server > tests/$SERVER_LOG 2>&1 &
+SERVER_PID=$!
+cd tests
+# verify server restarted
+sleep 1
+if ! kill -0 "$SERVER_PID" 2>/dev/null; then
+    print_error "Failed to restart server (PID: $SERVER_PID)"
+    cat ../tests/$SERVER_LOG 2>/dev/null || true
+    exit 1
+fi
+print_success "Server restarted (PID: $SERVER_PID)"
 
 # Test 2: Concurrent clients (main test)
 print_status "Test 2: Concurrent Client Operations"
@@ -195,8 +219,13 @@ for i in $(seq 1 $NUM_CLIENTS); do
     PIDS+=($!)
 done
 
-# Wait for all clients to complete
-wait
+# Wait for all clients to complete (wait only for client PIDs, not for the server)
+if [ ${#PIDS[@]} -gt 0 ]; then
+    for p in "${PIDS[@]}"; do
+        # wait for each client background job to finish
+        wait "$p" 2>/dev/null || true
+    done
+fi
 
 END_TIME=$(date +%s)
 DURATION=$((END_TIME - START_TIME))
@@ -338,19 +367,29 @@ RACE_PASS="racepass"
 } | timeout 10 ../client_app > /dev/null 2>&1
 
 # Multiple clients uploading as same user concurrently
+
+RACE_PIDS=()
 for i in {1..5}; do
-    {
-        echo "LOGIN $RACE_USER $RACE_PASS"
-        sleep 0.2
-        echo "UPLOAD client_$i.txt"
-        sleep 0.5
-        echo "LIST"
-        sleep 0.2
-        echo "QUIT"
-    } | timeout 10 ../client_app > race_$i.log 2>&1 &
+    (
+        {
+            echo "LOGIN $RACE_USER $RACE_PASS"
+            sleep 0.2
+            echo "UPLOAD client_$i.txt"
+            sleep 0.5
+            echo "LIST"
+            sleep 0.2
+            echo "QUIT"
+        } | timeout 10 ../client_app > race_$i.log 2>&1 || true
+    ) &
+    RACE_PIDS+=("$!")
 done
 
-wait
+# wait only for the race client PIDs (avoid waiting on the server)
+if [ ${#RACE_PIDS[@]} -gt 0 ]; then
+    for p in "${RACE_PIDS[@]}"; do
+        wait "$p" 2>/dev/null || true
+    done
+fi
 
 # Check for crashes or errors
 RACE_ERRORS=0

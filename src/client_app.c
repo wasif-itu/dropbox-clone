@@ -5,6 +5,7 @@
 #include <unistd.h>
 #include <arpa/inet.h>
 #include <errno.h>
+#include <sys/stat.h>
 
 #ifndef SERVER_PORT
 #define SERVER_PORT 8080
@@ -271,18 +272,26 @@ int main() {
                 
                 buf[size] = '\0';
                 
-                /* Save to file */
-                FILE *fp = fopen(filename, "wb");
+                /* Save to file in downloads/ to make location explicit */
+                char outdir[] = "downloads";
+                mkdir(outdir, 0755);
+                char outpath[512];
+                snprintf(outpath, sizeof(outpath), "%s/%s", outdir, filename);
+                FILE *fp = fopen(outpath, "wb");
                 if (!fp) {
                     perror("fopen");
                     free(buf);
                     continue;
                 }
-                fwrite(buf, 1, size, fp);
+                size_t wrote = fwrite(buf, 1, size, fp);
                 fclose(fp);
                 free(buf);
-                
-                printf("Downloaded %s (%zu bytes)\n", filename, size);
+
+                if (wrote != size) {
+                    printf("Download incomplete: wrote %zu of %zu bytes\n", wrote, size);
+                } else {
+                    printf("Downloaded %s -> %s (%zu bytes)\n", filename, outpath, size);
+                }
             } else {
                 printf("%s", resp);
             }

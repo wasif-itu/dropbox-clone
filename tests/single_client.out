@@ -1,0 +1,16 @@
+Client: connecting to 127.0.0.1:8080
+Connected successfully!
+
+Commands available:
+  SIGNUP <user> <pass>
+  LOGIN <user> <pass>
+  UPLOAD <filename>
+  DOWNLOAD <filename>
+  LIST
+  DELETE <filename>
+  QUIT
+
+> OK signup
+> OK login
+> (empty directory)
+> OK bye

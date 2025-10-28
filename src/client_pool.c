@@ -13,6 +13,7 @@
 #include <errno.h>
 #include <sys/types.h>
 #include <sys/socket.h>
+#include <stdbool.h>
 
 #ifndef BUFFER_SIZE
 #define BUFFER_SIZE 4096
@@ -22,7 +23,7 @@ static pthread_t *client_threads = NULL;
 static size_t client_thread_count = 0;
 static queue_t *client_queue_global = NULL;
 static queue_t *task_queue_global = NULL;
-static int client_running = 0;
+/* client threads stop when queue is closed; use client_threads != NULL as started flag */
 
 static ssize_t robust_readline(int fd, char *buf, size_t maxlen) {
     size_t idx = 0;
@@ -298,7 +299,7 @@ static void client_handle_connection(int client_fd) {
 /* thread main */
 static void *client_thread_main(void *arg) {
     (void)arg;
-    while (client_running) {
+    while (1) {
         int *pfd = (int *)queue_pop(client_queue_global);
         if (!pfd) break;
         int client_fd = *pfd;
@@ -309,14 +310,13 @@ static void *client_thread_main(void *arg) {
 }
 
 int client_pool_start(size_t num_threads, queue_t *client_queue, queue_t *task_queue) {
-    if (client_running) return -1;
+    if (client_threads != NULL) return -1;
     if (!client_queue || !task_queue || num_threads == 0) return -1;
     client_queue_global = client_queue;
     task_queue_global = task_queue;
     client_threads = calloc(num_threads, sizeof(pthread_t));
     if (!client_threads) return -1;
     client_thread_count = num_threads;
-    client_running = 1;
     for (size_t i = 0; i < num_threads; ++i) {
         pthread_create(&client_threads[i], NULL, client_thread_main, NULL);
     }
@@ -324,8 +324,8 @@ int client_pool_start(size_t num_threads, queue_t *client_queue, queue_t *task_q
 }
 
 void client_pool_stop(void) {
-    if (!client_running) return;
-    client_running = 0;
+    if (!client_threads) return;
+    /* close the client queue to wake client threads */
     queue_close(client_queue_global);
     for (size_t i = 0; i < client_thread_count; ++i) {
         pthread_join(client_threads[i], NULL);

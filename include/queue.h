@@ -3,6 +3,7 @@
 
 #include <stddef.h>
 #include <pthread.h>
+#include <stdatomic.h>
 
 typedef struct queue_t {
     void **buf;
@@ -13,7 +14,7 @@ typedef struct queue_t {
     pthread_mutex_t mtx;
     pthread_cond_t not_empty;
     pthread_cond_t not_full;
-    int closed;
+    atomic_int closed;
 } queue_t;
 
 queue_t *queue_create(size_t capacity);

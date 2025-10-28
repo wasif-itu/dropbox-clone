@@ -11,21 +11,35 @@
 #include <unistd.h>
 #include <arpa/inet.h>
 #include <string.h>
+#include <poll.h>
+#include <fcntl.h>
+#include <errno.h>
 
 static queue_t *client_queue = NULL;
 static queue_t *task_queue = NULL;
 static int server_fd = -1;
+/* self-pipe fds for safe signal handling */
+static int sig_pipe_fds[2] = {-1, -1};
 
 static void handle_sigint(int sig) {
     (void)sig;
-    printf("\nShutting down server...\n");
-    if (server_fd != -1) close(server_fd);
-    if (client_queue) queue_close(client_queue);
-    if (task_queue) queue_close(task_queue);
-    /* client_pool_stop() and worker_pool_stop() will be called after accept loop breaks */
+    /* async-signal-safe: write a byte to the pipe to notify main loop */
+    if (sig_pipe_fds[1] != -1) {
+        char c = 'x';
+        ssize_t r = write(sig_pipe_fds[1], &c, 1);
+        (void)r; /* ignore write errors in handler */
+    }
 }
 
 int main(void) {
+    /* create self-pipe before installing handler */
+    if (pipe(sig_pipe_fds) != 0) {
+        perror("pipe");
+        return 1;
+    }
+    /* make read end non-blocking (safe) */
+    int flags = fcntl(sig_pipe_fds[0], F_GETFL, 0);
+    if (flags != -1) fcntl(sig_pipe_fds[0], F_SETFL, flags | O_NONBLOCK);
     signal(SIGINT, handle_sigint);
 
     auth_init();
@@ -75,23 +89,49 @@ int main(void) {
 
     printf("Server listening on %d\n", SERVER_PORT);
 
+    /* Use poll to wait on listening socket and the signal pipe */
+    struct pollfd fds[2];
+    fds[0].fd = server_fd;
+    fds[0].events = POLLIN;
+    fds[1].fd = sig_pipe_fds[0];
+    fds[1].events = POLLIN;
+
     while (1) {
-        int client_fd = accept(server_fd, (struct sockaddr *)&address, (socklen_t *)&addrlen);
-        if (client_fd < 0) {
-            /* likely interrupted by signal -> break */
+        int rv = poll(fds, 2, -1);
+        if (rv < 0) {
+            if (errno == EINTR) continue;
+            perror("poll");
             break;
         }
-        /* push fd pointer to client queue */
-        int *pfd = malloc(sizeof(int));
-        *pfd = client_fd;
-        if (queue_push(client_queue, pfd) != 0) {
-            /* queue closed or push failed */
-            close(client_fd);
-            free(pfd);
+        /* signal pipe triggered -> shutdown */
+        if (fds[1].revents & POLLIN) {
+            char buf[32];
+            /* drain pipe */
+            while (read(sig_pipe_fds[0], buf, sizeof(buf)) > 0) {}
+            break;
+        }
+        if (fds[0].revents & POLLIN) {
+            int client_fd = accept(server_fd, (struct sockaddr *)&address, (socklen_t *)&addrlen);
+            if (client_fd < 0) continue;
+            /* push fd pointer to client queue */
+            int *pfd = malloc(sizeof(int));
+            *pfd = client_fd;
+            if (queue_push(client_queue, pfd) != 0) {
+                /* queue closed or push failed */
+                close(client_fd);
+                free(pfd);
+            }
         }
     }
 
-    /* shutdown sequence */
+    /* cleanup the signal pipe */
+    if (sig_pipe_fds[0] != -1) close(sig_pipe_fds[0]);
+    if (sig_pipe_fds[1] != -1) close(sig_pipe_fds[1]);
+
+    /* shutdown sequence: close queues to wake worker threads */
+    if (client_queue) queue_close(client_queue);
+    if (task_queue) queue_close(task_queue);
+
     client_pool_stop();
     worker_pool_stop();
 

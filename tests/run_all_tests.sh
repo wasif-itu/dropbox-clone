@@ -154,6 +154,7 @@ sleep 3
 
 # Run concurrent operations
 cd tests
+PIDS=()
 for i in {1..3}; do
     (
         echo "SIGNUP tsanuser$i pass$i"
@@ -164,8 +165,12 @@ for i in {1..3}; do
         sleep 0.3
         echo "QUIT"
     ) | timeout 10 ../client_app > /dev/null 2>&1 &
+    PIDS+=("$!")
 done
-wait
+# wait only for the client PIDs (avoid waiting on the TSAN server process)
+for p in "${PIDS[@]}"; do
+    wait "$p" 2>/dev/null || true
+done
 
 cd ..
 
